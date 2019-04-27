@@ -9,7 +9,8 @@ import datetime
 
 # Debugging settings
 production = True   # Use serial or file as input
-debugging = 1   # Show extra output
+debugging = 0   # Show extra output
+time_code='0-0:1.0.0'
 # DSMR interesting codes
 list_of_interesting_codes = {
     '1-0:1.8.1': 'Meter Reading electricity delivered to client (Tariff 1) in kWh',
@@ -25,19 +26,54 @@ list_of_interesting_codes = {
     '0-0:96.7.9': 'Number of long power failures in any phase',
     '1-0:32.32.0': 'Number of voltage sags in phase L1',
     '1-0:52.32.0': 'Number of voltage sags in phase L2',
-    '1-0:72:32.0': 'Number of voltage sags in phase L3',
+    '1-0:72.32.0': 'Number of voltage sags in phase L3',
     '1-0:32.36.0': 'Number of voltage swells in phase L1',
     '1-0:52.36.0': 'Number of voltage swells in phase L2',
     '1-0:72.36.0': 'Number of voltage swells in phase L3',
     '1-0:31.7.0': 'Instantaneous current L1 in A',
     '1-0:51.7.0': 'Instantaneous current L2 in A',
     '1-0:71.7.0': 'Instantaneous current L3 in A',
+    '1-0:32.7.0': 'Instantaneous voltage L1 in V',
+    '1-0:52.7.0': 'Instantaneous voltage L2 in V',
+    '1-0:72.7.0': 'Instantaneous voltage L3 in V',
     '1-0:21.7.0': 'Instantaneous active power L1 (+P) in kW',
     '1-0:41.7.0': 'Instantaneous active power L2 (+P) in kW',
     '1-0:61.7.0': 'Instantaneous active power L3 (+P) in kW',
     '1-0:22.7.0': 'Instantaneous active power L1 (-P) in kW',
     '1-0:42.7.0': 'Instantaneous active power L2 (-P) in kW',
-    '1-0:62.7.0': 'Instantaneous active power L3 (-P) in kW'
+    '1-0:62.7.0': 'Instantaneous active power L3 (-P) in kW',
+    '0-1:24.2.1': 'Gas in m3'
+}
+
+list_of_interesting_codes_params = {
+    '0-0:1.0.0': 'time',
+    '1-0:1.8.1': 'e_total_input_tariff1_kWh',
+    '1-0:1.8.2': 'e_total_input_tariff2_kWh',
+    '1-0:2.8.1': 'e_total_output_tariff1_kWh',
+    '1-0:2.8.2': 'e_total_output_tariff2_kWh',
+    '0-0:96.14.0': 'e_current_tariff_indicator',
+    '1-0:1.7.0': 'e_current_input_kW',
+    '1-0:2.7.0': 'e_current_output_kW',
+    '0-0:96.7.21': 'e_total_failure_short',
+    '0-0:96.7.9': 'e_total_failure_long',
+    '1-0:32.32.0': 'e_total_voltage_sag_L1',
+    '1-0:52.32.0': 'e_total_voltage_sag_L2',
+    '1-0:72.32.0': 'e_total_voltage_sag_L3',
+    '1-0:32.36.0': 'e_total_voltage_swell_L1',
+    '1-0:52.36.0': 'e_total_voltage_swell_L2',
+    '1-0:72.36.0': 'e_total_voltage_swell_L3',
+    '1-0:31.7.0': 'e_current_current_L1_A',
+    '1-0:51.7.0': 'e_current_current_L2_A',
+    '1-0:71.7.0': 'e_current_current_L3_A',
+    '1-0:32.7.0': 'e_current_voltage_L1_V',
+    '1-0:52.7.0': 'e_current_voltage_L2_V',
+    '1-0:72.7.0': 'e_current_voltage_L3_V',
+    '1-0:21.7.0': 'e_current_input_L1_kW',
+    '1-0:41.7.0': 'e_current_input_L2_kW',
+    '1-0:61.7.0': 'e_current_input_L3_kW',
+    '1-0:22.7.0': 'e_current_output_L1_kW',
+    '1-0:42.7.0': 'e_current_output_L2_kW',
+    '1-0:62.7.0': 'e_current_output_L3_kW'
 }
 
 # Program variables
@@ -49,6 +85,7 @@ crc16 = crcmod.predefined.mkPredefinedCrcFun('crc16')
 telegram = ''
 checksum_found = False
 good_checksum = False
+last_gas = ''
 
 
 if production:
@@ -124,6 +161,8 @@ while True:
             print("Good checksum !")
         # Store the vaules in a dictionary
         telegram_values = dict()
+	e_time=''
+	g_time=''
         # Split the telegram into lines and iterate over them
         for telegram_line in telegram.split(b'\r\n'):
             # Split the OBIS code from the value
@@ -141,14 +180,26 @@ while True:
                 # You can't put a list in a dict TODO better solution
                 code = ''.join(re.split(b'(\()', telegram_line)[:1])
                 value = ''.join(re.split(b'(\()', telegram_line)[1:])
-                telegram_values[code] = value
+		if code == "0-1:24.2.1" and last_gas != value:
+			last_gas=value
+			value = re.split(b'(\()', telegram_line)[4]
+			time = re.split(b'(\()', telegram_line)[2]
+			value = float(re.sub(r'(\*|\)).*','',value.lstrip(b'\(')))
+			time = time.lstrip(b'\(').rstrip(b')')
+			print "time=%s" % time,
+			print "g_total_m3=%f" % value
+		else:
+                	telegram_values[code] = value
 
         # Print the lines to screen
         for code, value in sorted(telegram_values.items()):
-            if code in list_of_interesting_codes:
+            if code in list_of_interesting_codes_params:
                 # Cleanup value
-                value = float(value.lstrip(b'\(').rstrip(b'\)*kWhA'))
+		if list_of_interesting_codes_params[code] == 'time':
+			value = value.lstrip(b'\(').rstrip(b'\)')
+		else:
+			value = float(re.sub(r'(\*|\)).*','',value.lstrip(b'\(')))
                 # Print nicely formatted string
-		if debugging > 0:
-			print(datetime.datetime.utcnow()), 
-                print("{0:<63}{1:>12}".format(list_of_interesting_codes[code], value))
+                print("{0}={1}".format(list_of_interesting_codes_params[code], value)),
+	print ''
+	sys.stdout.flush()
